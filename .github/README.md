@@ -1,3 +1,5 @@
+<img width="2304" height="1440" alt="Screenshot_20261016_115100" src="https://github.com/user-attachments/assets/0c661bcf-ffd7-4421-b80c-22e1db28bba3" />
+
 # LightCraft for Android (early preview)
 
 An unofficial Android build of [LightCraft](https://github.com/storytold/lightcraft), the open-source photo library
