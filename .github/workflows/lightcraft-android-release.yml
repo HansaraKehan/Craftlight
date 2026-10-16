@@ -218,7 +218,7 @@ jobs:
           - Needs an ARM64 phone or tablet running Android 9 or newer with a Vulkan GPU.
           - Download the \`.apk\`, open it, and allow installs from your file manager or browser when Android asks.
           - On first start, turn on "Allow access to manage all files" so the built-in file browser can see your photos.
-          - Early preview: AI masks, denoise and HEIC are not included, and settings are not saved between launches.
+          - Early preview: AI features and HEIC are included but can be slow on phones without a strong GPU.
           - Unofficial build, not made or supported by the LightCraft team. If an update will not install over an older build, uninstall the old one first.
           NOTES
           gh release create "$TAG" "$APK" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
