@@ -1,5 +1,13 @@
 <img width="2304" height="1440" alt="Screenshot_20261016_115100" src="https://github.com/user-attachments/assets/0c661bcf-ffd7-4421-b80c-22e1db28bba3" />
 
+### 📊 App Downloads
+
+| Application | Description | Downloads | Link |
+| :--- | :--- | :--- | :--- |
+| **PhotoCraft** | Image editing app | [![Downloads](https://img.shields.io/github/downloads/HansaraKehan/CraftPhoto/total?style=flat-square&color=blue)](https://github.com/HansaraKehan/CraftPhoto/releases) | [Releases](https://github.com/HansaraKehan/CraftPhoto/releases) |
+| **LightCraft** | Light & theme utility | [![Downloads](https://img.shields.io/github/downloads/HansaraKehan/Craftlight/total?style=flat-square&color=orange)](https://github.com/HansaraKehan/Craftlight/releases) | [Releases](https://github.com/HansaraKehan/Craftlight/releases) |
+| **WordCraft** | Text utility app | [![Downloads](https://img.shields.io/github/downloads/HansaraKehan/CraftWord/total?style=flat-square&color=green)](https://github.com/HansaraKehan/CraftWord/releases) | [Releases](https://github.com/HansaraKehan/CraftWord/releases) |
+
 # LightCraft for Android (early preview)
 
 An unofficial Android build of [LightCraft](https://github.com/storytold/lightcraft), the open-source photo library
