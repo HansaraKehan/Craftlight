@@ -1,3 +1,5 @@
+# LightCraft for Android
+
 <img width="2304" height="1440" alt="Screenshot_20261016_115100" src="https://github.com/user-attachments/assets/0c661bcf-ffd7-4421-b80c-22e1db28bba3" />
 
 ### 📊 Application Downloads
@@ -10,7 +12,6 @@
 | **VectorCraft** | Vector graphic tool | [![Downloads](https://img.shields.io/github/downloads/HansaraKehan/CraftVector/total?style=flat-square&color=purple)](https://github.com/HansaraKehan/CraftVector/releases) | [View Releases](https://github.com/HansaraKehan/CraftVector/releases) |
 | **PDFCraft** | PDF manipulation tool | [![Downloads](https://img.shields.io/github/downloads/HansaraKehan/CraftPdf/total?style=flat-square&color=red)](https://github.com/HansaraKehan/CraftPdf/releases) | [View Releases](https://github.com/HansaraKehan/CraftPdf/releases) |
 
-# LightCraft for Android (early preview)
 
 An unofficial Android build of [LightCraft](https://github.com/storytold/lightcraft), the open-source photo library
 and raw developer written in Rust by the ArtCraft team. This build runs it as a native Android app
