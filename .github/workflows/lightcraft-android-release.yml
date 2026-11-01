@@ -1,15 +1,16 @@
 name: Build and release LightCraft Android APK
 
-# Builds the newest upstream LightCraft (storytold/lightcraft) with the Android layer
-# applied on top, then publishes the APK as a GitHub Release.
-# It only builds when upstream has something new (or when you run it by hand).
+# Builds the latest upstream LightCraft (storytold/lightcraft) RELEASE with the Android
+# layer applied on top, then publishes the APK as a GitHub Release with the same version.
+# The daily check only builds when upstream has published a release that has no Android
+# build yet. Changes to this repo's layer alone do not trigger a release.
 on:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
     inputs:
       ref:
-        description: "Upstream branch or tag to build (empty = main)"
+        description: "Upstream release tag to build (empty = upstream's latest release)"
         required: false
         default: ""
       force:
@@ -36,13 +37,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
-      - name: Pick the upstream ref
+      - name: Pick the upstream release
         id: ref
         env:
+          GH_TOKEN: ${{ github.token }}
           INPUT_REF: ${{ inputs.ref }}
-          VAR_REF: ${{ vars.UPSTREAM_REF }}
         run: |
-          REF="${INPUT_REF:-${VAR_REF:-main}}"
+          if [ -n "$INPUT_REF" ]; then
+            REF="$INPUT_REF"
+          else
+            # Fails with a clear error if upstream has never published a release.
+            REF=$(gh api "repos/${UPSTREAM}/releases/latest" --jq .tag_name)
+          fi
+          echo "Upstream release: $REF"
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
       - name: Check out this repository (the Android layer lives here)
@@ -63,11 +70,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           FORCE: ${{ inputs.force }}
+          REF_TAG: ${{ steps.ref.outputs.ref }}
         run: |
           VER=$(grep -m1 '^version' src/Cargo.toml | cut -d'"' -f2)
           SHA=$(git -C src rev-parse --short=7 HEAD)
-          LAYER=$(sha256sum fork/android-layer/lightcraft-android-layer.tar.gz | cut -c1-6)
-          TAG="android-v${VER}-${SHA}-${LAYER}"
+          TAG="android-${REF_TAG}"
           {
             echo "version=$VER"
             echo "sha=$SHA"
@@ -214,7 +221,7 @@ jobs:
           cat > notes.md <<NOTES
           **LightCraft ${VERSION} for Android** (early preview, ARM64)
 
-          Built automatically from upstream \`${UPSTREAM}\` at \`${REF}\` (commit \`${SHA}\`) with the Android layer applied.
+          Built automatically from upstream \`${UPSTREAM}\` release \`${REF}\` (commit \`${SHA}\`) with the Android layer applied.
 
           - Needs an ARM64 phone or tablet running Android 9 or newer with a Vulkan GPU.
           - Download the \`.apk\`, open it, and allow installs from your file manager or browser when Android asks.
@@ -222,8 +229,17 @@ jobs:
           - Early preview: AI features and HEIC are included but can be slow on phones without a strong GPU.
           - Unofficial build, not made or supported by the LightCraft team. If an update will not install over an older build, uninstall the old one first.
           NOTES
-          if [ -f "$RUNNER_TEMP/layer/whats-new.md" ]; then
-            { echo; echo "## What's new"; echo; cat "$RUNNER_TEMP/layer/whats-new.md"; } >> notes.md
+          # Upstream's own release notes, with contributor @mentions removed.
+          gh api "repos/${UPSTREAM}/releases/tags/${REF}" --jq '.body // ""' \
+            | sed -E 's/@[A-Za-z0-9_-]+(\/[A-Za-z0-9_.-]+)?//g' > upstream-notes.md
+          if [ -s upstream-notes.md ]; then
+            { echo; echo "## Upstream release notes"; echo; cat upstream-notes.md; } >> notes.md
+          fi
+          # Android-only notes apply to one version: the layer's whats-new.md starts with a
+          # line "for: <upstream tag>" and is only shown on that release.
+          WN="$RUNNER_TEMP/layer/whats-new.md"
+          if [ -f "$WN" ] && head -n1 "$WN" | grep -qx "for: ${REF}"; then
+            { echo; echo "## What's new"; echo; tail -n +2 "$WN"; } >> notes.md
           fi
           gh release create "$TAG" "$APK" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "LightCraft ${VERSION} Android (${SHA})" --notes-file notes.md
