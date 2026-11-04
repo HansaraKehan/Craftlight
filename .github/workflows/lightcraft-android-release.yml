@@ -17,6 +17,10 @@ on:
         description: "Build again even if this upstream version already has a release"
         type: boolean
         default: false
+      publish:
+        description: "Publish a GitHub Release (untick to only build the APK as a downloadable workflow artifact)"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -27,6 +31,7 @@ concurrency:
 
 env:
   UPSTREAM: storytold/lightcraft
+  PUBLISH: ${{ inputs.publish }}
   TARGET: aarch64-linux-android
   NDK_VERSION: 28.2.13676358
   BT_VERSION: 35.0.0
@@ -80,7 +85,11 @@ jobs:
             echo "sha=$SHA"
             echo "tag=$TAG"
           } >> "$GITHUB_OUTPUT"
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+          if [ "$PUBLISH" = "false" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
             if [ "$FORCE" = "true" ]; then
               gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
               echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -89,6 +98,7 @@ jobs:
               echo "skip=true" >> "$GITHUB_OUTPUT"
             fi
           else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -208,8 +218,17 @@ jobs:
           "$BT/apksigner" verify --verbose "$APK"
           echo "APK=$APK" >> "$GITHUB_ENV"
 
+      - name: Keep the APK as a workflow artifact (build-only runs)
+        if: steps.ver.outputs.skip != 'true' && steps.ver.outputs.publish == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: LightCraft-${{ steps.ver.outputs.version }}-android-arm64-v8a
+          path: src/${{ env.APK }}
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Publish the release
-        if: steps.ver.outputs.skip != 'true'
+        if: steps.ver.outputs.skip != 'true' && steps.ver.outputs.publish == 'true'
         working-directory: src
         env:
           GH_TOKEN: ${{ github.token }}
@@ -218,6 +237,18 @@ jobs:
           SHA: ${{ steps.ver.outputs.sha }}
           REF: ${{ steps.ref.outputs.ref }}
         run: |
+          # Upstream's own notes for this release. Drop GitHub's auto-generated "New Contributors"
+          # section and the "by @user in <PR link>" attribution on each bullet, so no one is tagged.
+          if gh release view "$REF" --repo "$UPSTREAM" --json body --jq .body > upstream-raw.md 2>/dev/null && [ -s upstream-raw.md ]; then
+            awk '
+              /^#+[ \t]*New Contributors[ \t]*$/ { skip = 1; next }
+              /^#+[ \t]/ { skip = 0 }
+              !skip
+            ' upstream-raw.md \
+              | sed -E 's/ by @[^ ]+ in [^ ]+[[:space:]]*$//; s/@[A-Za-z0-9_-]+//g' > upstream-notes.md
+          else
+            printf 'Upstream has no release notes for %s.\n' "$REF" > upstream-notes.md
+          fi
           cat > notes.md <<NOTES
           **LightCraft ${VERSION} for Android** (early preview, ARM64)
 
@@ -229,17 +260,52 @@ jobs:
           - Early preview: AI features and HEIC are included but can be slow on phones without a strong GPU.
           - Unofficial build, not made or supported by the LightCraft team. If an update will not install over an older build, uninstall the old one first.
           NOTES
-          # Upstream's own release notes, with contributor @mentions removed.
-          gh api "repos/${UPSTREAM}/releases/tags/${REF}" --jq '.body // ""' \
-            | sed -E 's/@[A-Za-z0-9_-]+(\/[A-Za-z0-9_.-]+)?//g' > upstream-notes.md
-          if [ -s upstream-notes.md ]; then
-            { echo; echo "## Upstream release notes"; echo; cat upstream-notes.md; } >> notes.md
-          fi
-          # Android-only notes apply to one version: the layer's whats-new.md starts with a
-          # line "for: <upstream tag>" and is only shown on that release.
+          { echo; echo "## Upstream release notes"; echo; cat upstream-notes.md; } >> notes.md
+          # Android-only changes: only the first "## ..." section of whats-new.md (the current version).
+          # Earlier sections are not repeated in later releases.
           WN="$RUNNER_TEMP/layer/whats-new.md"
-          if [ -f "$WN" ] && head -n1 "$WN" | grep -qx "for: ${REF}"; then
-            { echo; echo "## What's new"; echo; tail -n +2 "$WN"; } >> notes.md
+          ANDROID=$(awk '/^## / { if (seen) exit; seen = 1; next } seen' "$WN" 2>/dev/null)
+          if [ -n "$(printf '%s' "$ANDROID" | tr -d '[:space:]')" ]; then
+            { echo; echo "## What's new"; echo; printf '%s\n' "$ANDROID"; } >> notes.md
           fi
           gh release create "$TAG" "$APK" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "LightCraft ${VERSION} Android (${SHA})" --notes-file notes.md
+
+      - name: Update the README's Android features list
+        if: steps.ver.outputs.skip != 'true' && steps.ver.outputs.publish == 'true'
+        working-directory: fork
+        run: |
+          # Every Android feature added so far stays listed in README.md, between the markers below.
+          # Regenerated from all "- " bullets in whats-new.md on each release, so the README always
+          # describes what the current build can do.
+          START='<!-- android-features:start -->'
+          END='<!-- android-features:end -->'
+          FEATURES=$(grep '^- ' "$RUNNER_TEMP/layer/whats-new.md" || true)
+          if [ -z "$FEATURES" ]; then
+            echo "No Android features in whats-new.md - README left unchanged."
+            exit 0
+          fi
+          if ! grep -qF "$START" README.md; then
+            {
+              echo
+              echo "## LightCraft for Android"
+              echo
+              echo "An unofficial Android build is published from this fork's \`android-v*\` releases. What it can do:"
+              echo
+              echo "$START"
+              echo "$END"
+            } >> README.md
+          fi
+          awk -v start="$START" -v end="$END" -v features="$FEATURES" '
+            $0 == start { print; print features; skip = 1; next }
+            $0 == end { skip = 0 }
+            !skip
+          ' README.md > README.md.new
+          mv README.md.new README.md
+          if ! git diff --quiet -- README.md; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add README.md
+            git commit -m "Update the Android features list in README [skip ci]"
+            git push origin HEAD:main || echo "::warning::couldn't push the README update; update README.md by hand"
+          fi
