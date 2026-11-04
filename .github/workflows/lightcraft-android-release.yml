@@ -47,9 +47,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_REF: ${{ inputs.ref }}
+          VAR_TAG: ${{ vars.UPSTREAM_TAG }}
         run: |
+          # Priority: the ref typed into this run > the repo variable UPSTREAM_TAG (a pinned,
+          # tested release) > upstream's latest release.
           if [ -n "$INPUT_REF" ]; then
             REF="$INPUT_REF"
+          elif [ -n "$VAR_TAG" ]; then
+            REF="$VAR_TAG"
           else
             # Fails with a clear error if upstream has never published a release.
             REF=$(gh api "repos/${UPSTREAM}/releases/latest" --jq .tag_name)
@@ -237,37 +242,70 @@ jobs:
           SHA: ${{ steps.ver.outputs.sha }}
           REF: ${{ steps.ref.outputs.ref }}
         run: |
-          # Upstream's own notes for this release. Drop GitHub's auto-generated "New Contributors"
-          # section and the "by @user in <PR link>" attribution on each bullet, so no one is tagged.
-          if gh release view "$REF" --repo "$UPSTREAM" --json body --jq .body > upstream-raw.md 2>/dev/null && [ -s upstream-raw.md ]; then
-            awk '
-              /^#+[ \t]*New Contributors[ \t]*$/ { skip = 1; next }
-              /^#+[ \t]/ { skip = 0 }
-              !skip
-            ' upstream-raw.md \
-              | sed -E 's/ by @[^ ]+ in [^ ]+[[:space:]]*$//; s/@[A-Za-z0-9_-]+//g' > upstream-notes.md
-          else
-            printf 'Upstream has no release notes for %s.\n' "$REF" > upstream-notes.md
+          # Release notes, in this order:
+          #  1. The Android features new in this build: the first "## " section of whats-new.md.
+          #     Left out when the previous release already showed that same section.
+          #  2. What changed upstream since the previous release (commit list).
+          #  3. Upstream's own release notes (without contributor tags).
+          #  4. Install notes.
+          # The previous release is the newest android-* release; its body carries hidden markers
+          # with the upstream commit it was built from and the news section it showed.
+          NEWS="$RUNNER_TEMP/layer/whats-new.md"
+          PREV_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 50 --exclude-drafts --json tagName --jq '[.[] | select(.tagName | startswith("android-"))][0].tagName' 2>/dev/null || true)
+          PREV_BODY=""
+          if [ -n "$PREV_TAG" ]; then
+            PREV_BODY=$(gh release view "$PREV_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null || true)
           fi
-          cat > notes.md <<NOTES
-          **LightCraft ${VERSION} for Android** (early preview, ARM64)
-
-          Built automatically from upstream \`${UPSTREAM}\` release \`${REF}\` (commit \`${SHA}\`) with the Android layer applied.
-
-          - Needs an ARM64 phone or tablet running Android 9 or newer with a Vulkan GPU.
-          - Download the \`.apk\`, open it, and allow installs from your file manager or browser when Android asks.
-          - On first start, turn on "Allow access to manage all files" so the built-in file browser can see your photos.
-          - Early preview: AI features and HEIC are included but can be slow on phones without a strong GPU.
-          - Unofficial build, not made or supported by the LightCraft team. If an update will not install over an older build, uninstall the old one first.
-          NOTES
-          { echo; echo "## Upstream release notes"; echo; cat upstream-notes.md; } >> notes.md
-          # Android-only changes: only the first "## ..." section of whats-new.md (the current version).
-          # Earlier sections are not repeated in later releases.
-          WN="$RUNNER_TEMP/layer/whats-new.md"
-          ANDROID=$(awk '/^## / { if (seen) exit; seen = 1; next } seen' "$WN" 2>/dev/null)
-          if [ -n "$(printf '%s' "$ANDROID" | tr -d '[:space:]')" ]; then
-            { echo; echo "## What's new"; echo; printf '%s\n' "$ANDROID"; } >> notes.md
+          PREV_SHA=$(printf '%s' "$PREV_BODY" | sed -nE 's/.*<!-- upstream-sha:([0-9a-f]+) -->.*/\1/p')
+          TOP=""
+          if [ -f "$NEWS" ]; then
+            TOP=$(awk '/^## /{ if (seen) exit; seen = 1; next } seen' "$NEWS")
           fi
+          TOP_ID=$(printf '%s' "$TOP" | sha1sum | cut -c1-12)
+          {
+            if [ -n "$(printf '%s' "$TOP" | tr -d '[:space:]')" ] && ! printf '%s' "$PREV_BODY" | grep -qF "android-news:${TOP_ID}"; then
+              HEAD=$(awk '/^## /{ sub(/^## /, ""); print; exit }' "$NEWS")
+              echo "## New in the Android edition: ${HEAD}"
+              echo
+              printf '%s\n' "$TOP"
+              echo
+            fi
+            echo "## Changes from upstream"
+            echo
+            if [ -z "$PREV_SHA" ] || ! git rev-parse -q --verify "${PREV_SHA}^{commit}" > /dev/null; then
+              echo "First build here, or the previous build's upstream commit is not in the history."
+            else
+              COUNT=$(git rev-list --no-merges --count "${PREV_SHA}..HEAD")
+              if [ "$COUNT" = "0" ]; then
+                echo "No upstream commits since the previous build (\`${PREV_SHA}\`)."
+              else
+                echo "${COUNT} upstream commit(s) since the previous build (\`${PREV_SHA}\` to \`${SHA}\`):"
+                echo
+                git log --no-merges --max-count=40 --pretty='- %s' "${PREV_SHA}..HEAD"
+                if [ "$COUNT" -gt 40 ]; then echo "- and $((COUNT - 40)) more"; fi
+              fi
+            fi
+            if gh release view "$REF" --repo "$UPSTREAM" --json body --jq .body > upstream-raw.md 2>/dev/null && [ -s upstream-raw.md ]; then
+              echo
+              echo "## Upstream ${REF} release notes"
+              echo
+              # Without GitHub's "New Contributors" section and the "by @user in <PR>" suffixes.
+              awk '/^#+[ \t]*New Contributors[ \t]*$/ { skip = 1; next } /^#+[ \t]/ { skip = 0 } !skip' upstream-raw.md \
+                | sed -E 's/ by @[^ ]+ in [^ ]+[[:space:]]*$//; s/@[A-Za-z0-9_-]+//g'
+            fi
+            echo
+            echo "## About this build"
+            echo
+            echo "**LightCraft ${VERSION} for Android** (early preview, ARM64), built automatically from upstream \`${UPSTREAM}\` release \`${REF}\` (commit \`${SHA}\`) with the Android layer applied."
+            echo
+            echo "- Needs an ARM64 phone or tablet running Android 9 or newer with a Vulkan GPU."
+            echo "- Download the \`.apk\`, open it, and allow installs from your file manager or browser when Android asks."
+            echo "- On first start, turn on \"Allow access to manage all files\" so the built-in file browser can see your photos."
+            echo "- Unofficial build, not made or supported by the LightCraft team. If an update will not install over an older build, uninstall the old one first."
+            echo
+            echo "<!-- upstream-sha:$(git -C . rev-parse HEAD) -->"
+            echo "<!-- android-news:${TOP_ID} -->"
+          } > notes.md
           gh release create "$TAG" "$APK" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "LightCraft ${VERSION} Android (${SHA})" --notes-file notes.md
 
