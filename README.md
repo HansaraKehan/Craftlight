@@ -678,3 +678,12 @@ Forks and modified versions must remove them.
 [![Star History Chart](https://api.star-history.com/svg?repos=storytold/lightcraft&type=Date&legend=top-left)](https://www.star-history.com/?repos=storytold%2Flightcraft&type=date&legend=top-left)
 
 Library, Tools, and Presets panels can be regrouped, split, floated within the app window, closed, and reopened. Tools keeps the current Edit/Crop/Masking mode; the photo view and filmstrip stay together. Drag a panel header to a target edge or another header. Its context menu offers Float panel, Move to group, and Close panel. Existing panel toggles reopen panels at their saved location; Reset Panel Layout restores the app layout. Floating panels remain inside the current app window.
+
+## LightCraft for Android
+
+An unofficial Android build is published from this fork's `android-v*` releases. What it can do:
+
+<!-- android-features:start -->
+- A welcome window now appears on first start, explaining why LightCraft needs access to your files, with a clip-art illustration. Choose "Allow file access" to continue, or "Not now" to use the app without it.
+- The "library could not be locked" error message is now hidden.
+<!-- android-features:end -->
